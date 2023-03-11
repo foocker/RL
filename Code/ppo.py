@@ -1,240 +1,125 @@
-import math
-import random
-
 import gym
-import numpy as np
-
 import torch
-import torch.nn as nn
-import torch.optim as optim
 import torch.nn.functional as F
-from torch.distributions import Normal
-
 import matplotlib.pyplot as plt
-from IPython.display import clear_output
-
-from common.multiprocessing_env import SubprocVecEnv
+import common.rl_utils as rl_utils
 
 
+class PolicyNet(torch.nn.Module):
+    def __init__(self, state_dim, hidden_dim, action_dim):
+        super(PolicyNet, self).__init__()
+        self.fc1 = torch.nn.Linear(state_dim, hidden_dim)
+        self.fc2 = torch.nn.Linear(hidden_dim, action_dim)
 
-def make_env():
-    def _thunk():
-        env = gym.make(env_name)
-        return env
-
-    return _thunk
-
-
-def init_weights(m):
-    if isinstance(m, nn.Linear):
-        nn.init.normal_(m.weight, mean=0., std=0.1)
-        nn.init.constant_(m.bias, 0.1)
-        
-
-class ActorCritic(nn.Module):
-    def __init__(self, num_inputs, num_outputs, hidden_size, std=0.0):
-        super(ActorCritic, self).__init__()
-        
-        self.critic = nn.Sequential(
-            nn.Linear(num_inputs, hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, 1)
-        )
-        
-        self.actor = nn.Sequential(
-            nn.Linear(num_inputs, hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, num_outputs),
-        )
-        self.log_std = nn.Parameter(torch.ones(1, num_outputs) * std)
-        
-        self.apply(init_weights)
-        
     def forward(self, x):
-        value = self.critic(x)
-        mu    = self.actor(x)
-        std   = self.log_std.exp().expand_as(mu)
-        dist  = Normal(mu, std)
-        return dist, value
+        x = F.relu(self.fc1(x))
+        return F.softmax(self.fc2(x), dim=1)
 
-def plot(frame_idx, rewards):
-    clear_output(True)
-    plt.figure(figsize=(20,5))
-    plt.subplot(131)
-    plt.title('frame %s. reward: %s' % (frame_idx, rewards[-1]))
-    plt.plot(rewards)
-    plt.show()
-    
-def test_env(vis=False):
-    state = env.reset()
-    if vis: env.render()
-    done = False
-    total_reward = 0
-    while not done:
-        state = torch.FloatTensor(state).unsqueeze(0).to(device)
-        dist, _ = model(state)
-        next_state, reward, done, _ = env.step(dist.sample().cpu().numpy()[0])
-        state = next_state
-        if vis: env.render()
-        total_reward += reward
-    return total_reward
 
-def compute_gae(next_value, rewards, masks, values, gamma=0.99, tau=0.95):
-    values = values + [next_value]
-    gae = 0
-    returns = []
-    for step in reversed(range(len(rewards))):
-        delta = rewards[step] + gamma * values[step + 1] * masks[step] - values[step]
-        gae = delta + gamma * tau * masks[step] * gae
-        returns.insert(0, gae + values[step])
-    print(next_value, rewards, masks, values)
-    return returns
+class ValueNet(torch.nn.Module):
+    def __init__(self, state_dim, hidden_dim):
+        super(ValueNet, self).__init__()
+        self.fc1 = torch.nn.Linear(state_dim, hidden_dim)
+        self.fc2 = torch.nn.Linear(hidden_dim, 1)
 
-def ppo_iter(mini_batch_size, states, actions, log_probs, returns, advantage):
-    print(mini_batch_size, states, actions, log_probs, returns, advantage)
-    batch_size = states.size(0)
-    for _ in range(batch_size // mini_batch_size):
-        rand_ids = np.random.randint(0, batch_size, mini_batch_size)
-        yield states[rand_ids, :], actions[rand_ids, :], log_probs[rand_ids, :], returns[rand_ids, :], advantage[rand_ids, :]
-        
-        
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        return self.fc2(x)
 
-def ppo_update(ppo_epochs, mini_batch_size, states, actions, log_probs, returns, advantages, clip_param=0.2):
-    for _ in range(ppo_epochs):
-        for state, action, old_log_probs, return_, advantage in ppo_iter(mini_batch_size, states, actions, log_probs, returns, advantages):
-            dist, value = model(state)
-            entropy = dist.entropy().mean()
-            new_log_probs = dist.log_prob(action)
 
-            ratio = (new_log_probs - old_log_probs).exp()
+class PPO:
+    ''' PPO算法,采用截断方式 '''
+    def __init__(self, state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
+                 lmbda, epochs, eps, gamma, device):
+        self.actor = PolicyNet(state_dim, hidden_dim, action_dim).to(device)
+        self.critic = ValueNet(state_dim, hidden_dim).to(device)
+        self.state_dim = state_dim
+        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(),
+                                                lr=actor_lr)
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(),
+                                                 lr=critic_lr)
+        self.gamma = gamma
+        self.lmbda = lmbda
+        self.epochs = epochs  # 一条序列的数据用来训练轮数
+        self.eps = eps  # PPO中截断范围的参数
+        self.device = device
+
+    def take_action(self, state):
+        state = torch.tensor([state], dtype=torch.float).to(self.device).view(1, self.state_dim)
+        probs = self.actor(state)
+        action_dist = torch.distributions.Categorical(probs)
+        action = action_dist.sample()
+        return action.item()
+
+    def update(self, transition_dict):
+        states = torch.tensor(transition_dict['states'],
+                              dtype=torch.float).to(self.device)
+        actions = torch.tensor(transition_dict['actions']).view(-1, 1).to(
+            self.device)
+        rewards = torch.tensor(transition_dict['rewards'],
+                               dtype=torch.float).view(-1, 1).to(self.device)
+        next_states = torch.tensor(transition_dict['next_states'],
+                                   dtype=torch.float).to(self.device)
+        dones = torch.tensor(transition_dict['dones'],
+                             dtype=torch.float).view(-1, 1).to(self.device)
+        td_target = rewards + self.gamma * self.critic(next_states) * (1 -
+                                                                       dones)
+        td_delta = td_target - self.critic(states)
+        advantage = rl_utils.compute_advantage(self.gamma, self.lmbda,
+                                               td_delta.cpu()).to(self.device)
+        old_log_probs = torch.log(self.actor(states).gather(1,
+                                                            actions)).detach()
+
+        for _ in range(self.epochs):
+            log_probs = torch.log(self.actor(states).gather(1, actions))
+            ratio = torch.exp(log_probs - old_log_probs)
             surr1 = ratio * advantage
-            surr2 = torch.clamp(ratio, 1.0 - clip_param, 1.0 + clip_param) * advantage
+            surr2 = torch.clamp(ratio, 1 - self.eps,
+                                1 + self.eps) * advantage  # 截断
+            actor_loss = torch.mean(-torch.min(surr1, surr2))  # PPO损失函数
+            critic_loss = torch.mean(
+                F.mse_loss(self.critic(states), td_target.detach()))
+            self.actor_optimizer.zero_grad()
+            self.critic_optimizer.zero_grad()
+            actor_loss.backward()
+            critic_loss.backward()
+            self.actor_optimizer.step()
+            self.critic_optimizer.step()
 
-            actor_loss  = - torch.min(surr1, surr2).mean()
-            critic_loss = (return_ - value).pow(2).mean()
+actor_lr = 1e-3
+critic_lr = 1e-2
+num_episodes = 500
+hidden_dim = 128
+gamma = 0.98
+lmbda = 0.95
+epochs = 10
+eps = 0.2
+device = torch.device("cuda") if torch.cuda.is_available() else torch.device(
+    "cpu")
 
-            loss = 0.5 * critic_loss + actor_loss - 0.001 * entropy
+env_name = 'CartPole-v1'
+env = gym.make("CartPole-v1", render_mode="rgb_array")
+env.reset()
+env.render()
+torch.manual_seed(0)
+state_dim = env.observation_space.shape[0]
+action_dim = env.action_space.n
+agent = PPO(state_dim, hidden_dim, action_dim, actor_lr, critic_lr, lmbda,
+            epochs, eps, gamma, device)
 
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-
-if __name__ == '__main__':
-
-    use_cuda = torch.cuda.is_available()
-    device   = torch.device("cuda" if use_cuda else "cpu")
-
-    num_envs = 10    # setting small when using vscode.
-    env_name = "Pendulum-v0"
-
-    envs = [make_env() for i in range(num_envs)]
-    envs = SubprocVecEnv(envs)
-
-    env = gym.make(env_name)
-
-    num_inputs  = envs.observation_space.shape[0]  # 3:cos, sin, velocity
-    num_outputs = envs.action_space.shape[0]    # 1
-
-    # Hyper params:
-    hidden_size      = 256
-    lr               = 3e-4
-    num_steps        = 20
-    mini_batch_size  = 5
-    ppo_epochs       = 4
-    threshold_reward = -200
-
-    model = ActorCritic(num_inputs, num_outputs, hidden_size).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=lr)
-
-    max_frames = 15000
-    frame_idx  = 0
-    test_rewards = []
-
-    state = envs.reset()
-    early_stop = False
-
-    while frame_idx < max_frames and not early_stop:
-
-        log_probs = []
-        values    = []
-        states    = []
-        actions   = []
-        rewards   = []
-        masks     = []
-        entropy = 0
-
-        for _ in range(num_steps):
-            state = torch.FloatTensor(state).to(device)
-            dist, value = model(state)
-
-            action = dist.sample()
-            next_state, reward, done, _ = envs.step(action.cpu().numpy())
-
-            log_prob = dist.log_prob(action)
-            entropy += dist.entropy().mean()
-            
-            log_probs.append(log_prob)
-            values.append(value)
-            rewards.append(torch.FloatTensor(reward).unsqueeze(1).to(device))
-            masks.append(torch.FloatTensor(1 - done).unsqueeze(1).to(device))
-            
-            states.append(state)
-            actions.append(action)
-            
-            state = next_state
-            frame_idx += 1
-            
-            if frame_idx % 1000 == 0:
-                test_reward = np.mean([test_env() for _ in range(10)])
-                test_rewards.append(test_reward)
-                plot(frame_idx, test_rewards)
-                if test_reward > threshold_reward: early_stop = True
-                
-
-        next_state = torch.FloatTensor(next_state).to(device)
-        _, next_value = model(next_state)
-        returns = compute_gae(next_value, rewards, masks, values)
-
-        returns   = torch.cat(returns).detach()
-        log_probs = torch.cat(log_probs).detach()
-        values    = torch.cat(values).detach()
-        states    = torch.cat(states)
-        actions   = torch.cat(actions)
-        advantage = returns - values
-        
-        ppo_update(ppo_epochs, mini_batch_size, states, actions, log_probs, returns, advantage)
-
-    from itertools import count
-
-    max_expert_num = 50000
-    num_steps = 0
-    expert_traj = []
-
-    for i_episode in count():
-        state = env.reset()
-        done = False
-        total_reward = 0
-        
-        while not done:
-            state = torch.FloatTensor(state).unsqueeze(0).to(device)
-            dist, _ = model(state)
-            action = dist.sample().cpu().numpy()[0]
-            next_state, reward, done, _ = env.step(action)
-            state = next_state
-            total_reward += reward
-            expert_traj.append(np.hstack([state, action]))
-            num_steps += 1
-        
-        print("episode:", i_episode, "reward:", total_reward)
-        
-        if num_steps >= max_expert_num:
-            break
-            
-    expert_traj = np.stack(expert_traj)
-    print()
-    print(expert_traj.shape)
-    print()
-    np.save("expert_traj.npy", expert_traj)
+return_list = rl_utils.train_on_policy_agent(env, agent, num_episodes)
 
 
+episodes_list = list(range(len(return_list)))
+plt.plot(episodes_list, return_list)
+plt.xlabel('Episodes')
+plt.ylabel('Returns')
+plt.title('PPO on {}'.format(env_name))
+plt.show()
+
+mv_return = rl_utils.moving_average(return_list, 9)
+plt.plot(episodes_list, mv_return)
+plt.xlabel('Episodes')
+plt.ylabel('Returns')
+plt.title('PPO on {}'.format(env_name))
+plt.show()

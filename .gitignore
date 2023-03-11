@@ -1,0 +1,7 @@
+Code/common/__pycache__/*
+*.aux
+*.gz
+*.toc
+*.out
+*.log
+

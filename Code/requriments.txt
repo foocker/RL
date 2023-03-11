@@ -1,0 +1,4 @@
+# wsl2 ubuntu18.04
+gym==0.26.1
+torch==1.10.0+cu11
+torchvision==0.11.1+cu113

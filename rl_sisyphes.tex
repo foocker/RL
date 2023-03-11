@@ -54,6 +54,27 @@ RL的学习应该会比较漫长。一个假想的研究员的学习情况，也
 所以，本小册子，以基本概念，基本定理，问题建模，代码实现，新论文的近似阅读为逻辑展开。当前版本0.1，将来若有
 时间，会逐渐完善。
 
+\subsection{废话补充2023.3.11}
+三年过去了。
+
+列举一些基本认识，和新的(相对于2020年)比较清晰的入门教程。
+\begin{itemize}
+    \item \href{https://hrl.boyuai.com/}{动手学强化学习}包含比较全面的介绍，以及代码。代码存在版本问题，我更改了一些细节，
+    适应了现在的版本gym=0.26.x。
+\end{itemize}
+
+强化学习基本工具的认识：
+\begin{itemize}
+    \item Issac Gym:GPU采样
+    \item \href{https://www.zhihu.com/question/333671830/answer/2387452922}{Isaac Gym的经验介绍}
+    \item gym 
+    \item \href{https://github.com/Unity-Technologies/ml-agents}{ml-agents}
+    \item \href{https://www.zhihu.com/question/333671830/answer/2383509386}{各种基本库的经验介绍}。
+\end{itemize}
+
+链接形式补充了一些遗留的基础，别人写的不错，我也懒得滥竽充数了。个人主要集中在一些基础代码，项目实战，RLHF，
+角色动画，图像生成的精准控制相关的内容上。
+
 \newpage
 \section{基本认识}
 \subsection{什么是强化学习}
@@ -865,7 +886,6 @@ $$H=\nabla_{\theta}^{2} K L\left(\pi_{\theta_{t}} \| \pi_{\theta}\right)=E_{a, s
 
 将Fisher Information Matrix的逆用共轭算法实现的算法流程见\ref{Nature:CTRPO}。
 
-
 而ACKTR则对FIM的逆的计算做了进一步改进(使用了矩阵的分块计算)。
 
 
@@ -902,43 +922,39 @@ $$L_{t}(\theta)=\min \left(r_{t}(\theta) \hat{A}_{t}, \operatorname{clip}\left(r
 	\end{minipage}
 \end{figure}
 
-
 \subsubsection{Q-learning→DDPG→TD3→SAC}
-DDPG为DQN的连续版本。
+\begin{itemize}
+    \item \href{https://hrl.boyuai.com/chapter/2/sac%E7%AE%97%E6%B3%95}{SAC}
+\end{itemize}
 
 \section{Model Based}
+参考\href{https://hrl.boyuai.com/chapter/3/%E5%9F%BA%E4%BA%8E%E6%A8%A1%E5%9E%8B%E7%9A%84%E7%AD%96%E7%95%A5%E4%BC%98%E5%8C%96}{基于模型的策略优化}。
+
 
 \section{模仿学习}
+参考\href{https://hrl.boyuai.com/chapter/3/%E6%A8%A1%E4%BB%BF%E5%AD%A6%E4%B9%A0}{模仿学习}
 
 \section{分布式系统}
 后续也许着重了解。
 
-\section{Code}
-算法基本都有开源实现，环境模拟有
-\href{https://gym.openai.com/}{gym}，\href{http://www.mujoco.org/}{MojoCO}等。
-
-\href{https://github.com/higgsfield/RL-Adventure-2}{RL-Adventure-2}：干净简洁明的实现了DQN+PG系列;
-\href{https://github.com/sfujim/TD3/}{TD3}：论文细节完备实现；
-\href{https://github.com/cuhkrlcourse/DeepRL-Tutorials}{DeepRL-Tutorials Codes}：RL-Adventure的复杂版本。
-
-Code目录代码选自RL-Adventure-2。
-% \begin{lstlisting}[python]
-    
-% \end{lstlisting}
-
-\section{可能都是我错了}
-\label{sec:seemswrong}
+\section{多智能体}
 \begin{itemize}
-    \item 章节3，p11,$(S_1, A_1, R_1, \ldots, S_t)$的$R_1$是之前的$R_2$写法不一致，一个是及时奖励，一个是奖励函数的延迟奖励？
-    \item 第3章，p20，$G_{t}^{(1)}=R_{t+1}+\gamma v(S_{t+1})$这里的$v(S_t)$和原始的$V(S_t)$意思似乎不太一致，在
-    Sutton书中p143，是定义的形式，此处在头上加了(1)，效果也看成定义，但原始的$V$是$G$的期望，正常来说折扣和和状态是有关的。
-    % 若$G_{t}^{(1)}$理解成当前状态的期望回报，就能说通了，但这不就是原始$V_t$吗。
-    \item 第3章，p33的等式开头是不是错了？Sutton的也如此。
-    \item 第5章，p13，$r(s_t, a_{t}^{\tau})$不是折扣和，但p12却用了$R(s, a)$，这和以前的符号，似乎矛盾。
-    \item 第5章，p19的3 Likelihood ratios，似乎和维基上的不太一致。具体含义可参考\href{http://blog.shakirm.com/2015/11/machine-learning-trick-of-the-day-5-log-derivative-trick/}{log LR}
-    \item 第5章，p23$R_{\tau}$对应了$(T+1)$个$R(s_t, a_t)$，应该改为$T-1$？
-    \item 第5章，p27$V$应该是$J$。
-    \item 第6章，p20,21$KL$在new, old上面似乎不一致。
-    \item 以上问他周老师就一些地方已经做了修改，后面勘察一遍。
+    \item \href{https://hrl.boyuai.com/chapter/3/%E5%A4%9A%E6%99%BA%E8%83%BD%E4%BD%93%E5%BC%BA%E5%8C%96%E5%AD%A6%E4%B9%A0%E5%85%A5%E9%97%A8}{一}
+    \item \href{https://hrl.boyuai.com/chapter/3/%E5%A4%9A%E6%99%BA%E8%83%BD%E4%BD%93%E5%BC%BA%E5%8C%96%E5%AD%A6%E4%B9%A0%E8%BF%9B%E9%98%B6}{二}
 \end{itemize}
+
+\section{Code}
+参考code目录，或者
+\begin{itemize}
+    \item \href{https://github.com/thu-ml/tianshou}{tianshou}
+    \item \href{https://github.com/DLR-RM/stable-baselines3}{stable-baselines3}
+    \item \href{https://github.com/boyu-ai/Hands-on-RL}{Hands-on-RL}版本老，目录Code部分是对其的更新
+    \item \href{https://www.raylib.com/}{raylib}
+\end{itemize}
+
+\section{RLHF}
+\begin{itemize}
+    \item \href{https://github.com/HarderThenHarder/transformers_tasks/tree/main/RLHF}{包含ChatGPT Reward Model训练流程}
+\end{itemize}
+
 \end{document}
